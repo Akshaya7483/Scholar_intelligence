@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scholar Batch Collector</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="container">
+        <h1>Scholar Batch Collector</h1>
+        <p>Upload keywords or paste them and download CSV/XLSX/JSON/PDFs ZIP.</p>
+      </div>
+    </header>
+    <main class="container">
+      <section class="grid">
+        <div class="card">
+          <h2>Paste Keywords</h2>
+          <textarea id="keywords" rows="8" placeholder="one keyword per line"></textarea>
+          <div class="right">
+            <button id="startKeywords">Start</button>
+          </div>
+        </div>
+      </section>
+      <section id="authRow" class="card hidden">
+        <h3>Optional API Token</h3>
+        <p>Only needed if the backend requires Authorization.</p>
+        <input id="token" type="text" placeholder="Bearer token (optional)" />
+      </section>
+      <section id="statusCard" class="card hidden">
+        <div class="row between">
+          <div>Job: <span id="jobId">-</span></div>
+          <div id="jobStatus" class="badge">-</div>
+        </div>
+        <div class="progress">
+          <div id="progressBar"></div>
+        </div>
+        <div id="downloads" class="row gap hidden">
+          <a id="dlCsv" class="btn" href="#" download>Download CSV</a>
+          <a id="dlXlsx" class="btn outline" href="#" download>Download Excel</a>
+          <a id="dlJson" class="btn outline" href="#" download>Download JSON</a>
+          <a id="dlZip" class="btn purple" href="#" download>Download PDFs ZIP</a>
+        </div>
+        <div id="errorMsg" class="error hidden"></div>
+      </section>
+    </main>
+    <script src="/assets/app.js"></script>
+  </body>
+ </html>

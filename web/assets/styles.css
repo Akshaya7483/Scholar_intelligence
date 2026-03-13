@@ -1,0 +1,34 @@
+:root {
+  --bg1: #0f172a;
+  --bg2: #111827;
+  --card: #1f2937;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --primary: #10b981;
+  --blue: #3b82f6;
+  --purple: #8b5cf6;
+  --danger: #ef4444;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--text); background: linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 70%); }
+.container { max-width: 960px; margin: 0 auto; padding: 16px; }
+.hero { padding: 32px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.hero h1 { margin: 0 0 8px; }
+.hero p { margin: 0; color: var(--muted); }
+.grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 768px) { .grid { grid-template-columns: 1fr 1fr; } }
+.card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px; }
+h2, h3 { margin-top: 0; }
+.row { display: flex; align-items: center; gap: 8px; }
+.row.between { justify-content: space-between; }
+.row.gap { gap: 12px; }
+.right { text-align: right; margin-top: 8px; }
+input[type="file"], input[type="text"], textarea { width: 100%; background: var(--card); border: 1px solid rgba(255,255,255,0.12); color: var(--text); padding: 10px 12px; border-radius: 8px; }
+button, .btn { border: none; background: var(--primary); color: #081217; padding: 10px 14px; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; font-weight: 600; }
+.btn.outline { background: transparent; color: var(--text); border: 1px solid rgba(255,255,255,0.12); }
+.btn.purple { background: var(--purple); color: #fff; }
+.badge { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); color: var(--muted); }
+.progress { height: 8px; background: rgba(255,255,255,0.08); border-radius: 6px; overflow: hidden; margin-top: 8px; }
+#progressBar { height: 100%; width: 0%; background: var(--blue); }
+.error { margin-top: 8px; color: var(--danger); }
+.hidden { display: none; }
