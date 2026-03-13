@@ -1,5 +1,0 @@
-.env
-tmp/
-node_modules/
-**/node_modules/
-dist/

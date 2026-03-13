@@ -4,46 +4,137 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Scholar Batch Collector</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
     <header class="hero">
-      <div class="container">
-        <h1>Scholar Batch Collector</h1>
-        <p>Upload keywords or paste them and download CSV/XLSX/JSON/PDFs ZIP.</p>
+      <div class="container header-content">
+        <button id="menuToggle" class="hamburger-btn">
+          <i class="fas fa-bars"></i>
+        </button>
+        <h1><i class="fas fa-graduation-cap"></i> Scholar Intelligence</h1>
       </div>
     </header>
     <main class="container">
-      <section class="grid">
-        <div class="card">
-          <h2>Paste Keywords</h2>
-          <textarea id="keywords" rows="8" placeholder="one keyword per line"></textarea>
-          <div class="right">
-            <button id="startKeywords">Start</button>
+      <div class="split-view">
+        <aside id="sidebar" class="left-panel">
+          <div class="card search-card">
+            <h2><i class="fas fa-search"></i> Search Keywords</h2>
+            <div class="field-row">
+              <label for="keywords">Keyword List</label>
+              <div class="search-input-group">
+                <textarea id="keywords" rows="6" placeholder="Paste keywords here (one per line)"></textarea>
+              </div>
+            </div>
+            
+            <div class="advanced-search">
+              <h3><i class="fas fa-sliders-h"></i> Advanced Filters</h3>
+              <div class="field-row">
+                <label for="advAuthor">Author Name</label>
+                <div class="input-with-icon">
+                  <i class="fas fa-user"></i>
+                  <input type="text" id="advAuthor" placeholder="e.g. PJ Hayes">
+                </div>
+              </div>
+              <div class="field-row">
+                <label for="advJournal">Publication / Journal</label>
+                <div class="input-with-icon">
+                  <i class="fas fa-book"></i>
+                  <input type="text" id="advJournal" placeholder="e.g. Nature">
+                </div>
+              </div>
+              <div class="field-row dual">
+                <div class="input-col">
+                  <label for="yearFrom">Year From</label>
+                  <div class="input-with-icon">
+                    <i class="fas fa-calendar-alt"></i>
+                    <input type="number" id="yearFrom" placeholder="YYYY">
+                  </div>
+                </div>
+                <div class="input-col">
+                  <label for="yearTo">Year To</label>
+                  <div class="input-with-icon">
+                    <i class="fas fa-calendar-alt"></i>
+                    <input type="number" id="yearTo" placeholder="YYYY">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="right">
+              <button id="startKeywords" class="primary-btn search-btn">
+                <i class="fas fa-rocket"></i> Start Search
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
-      <section id="authRow" class="card hidden">
-        <h3>Optional API Token</h3>
-        <p>Only needed if the backend requires Authorization.</p>
-        <input id="token" type="text" placeholder="Bearer token (optional)" />
-      </section>
-      <section id="statusCard" class="card hidden">
-        <div class="row between">
-          <div>Job: <span id="jobId">-</span></div>
-          <div id="jobStatus" class="badge">-</div>
-        </div>
-        <div class="progress">
-          <div id="progressBar"></div>
-        </div>
-        <div id="downloads" class="row gap hidden">
-          <a id="dlCsv" class="btn" href="#" download>Download CSV</a>
-          <a id="dlXlsx" class="btn outline" href="#" download>Download Excel</a>
-          <a id="dlJson" class="btn outline" href="#" download>Download JSON</a>
-          <a id="dlZip" class="btn purple" href="#" download>Download PDFs ZIP</a>
-        </div>
-        <div id="errorMsg" class="error hidden"></div>
-      </section>
+
+          <div id="statusCard" class="card hidden">
+            <div class="status-header">
+              <span id="jobStatus" class="status-badge">queued</span>
+              <span id="jobId" class="job-id"></span>
+            </div>
+            <div class="progress-container">
+              <div id="progressBar" class="progress-bar"></div>
+            </div>
+            <div id="downloads" class="download-grid hidden">
+              <a id="dlCsv" href="#" class="dl-btn"><i class="fas fa-file-csv"></i> CSV</a>
+              <a id="dlXlsx" href="#" class="dl-btn"><i class="fas fa-file-excel"></i> Excel</a>
+              <a id="dlJson" href="#" class="dl-btn"><i class="fas fa-file-code"></i> JSON</a>
+              <a id="dlZip" href="#" class="dl-btn zip"><i class="fas fa-file-archive"></i> ZIP PDFs</a>
+            </div>
+            <p id="errorMsg" class="error-msg"></p>
+          </div>
+        </aside>
+
+        <section class="right-panel">
+          <div class="results-header card">
+            <div class="header-top">
+              <h2>Live Results <span id="resultsCount" class="count-badge">0</span></h2>
+              <div class="sort-controls">
+                <i class="fas fa-sort-amount-down"></i>
+                <span>Sort by:</span>
+                <select id="sortBy">
+                  <option value="relevance">Relevance</option>
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                  <option value="cited">Most Cited</option>
+                  <option value="pdf">PDF Available</option>
+                </select>
+              </div>
+            </div>
+            <div class="filters">
+              <div class="input-with-icon search-filter-box">
+                <i class="fas fa-filter"></i>
+                <input type="text" id="searchFilter" placeholder="Filter results...">
+              </div>
+              <select id="yearFilter">
+                <option value="">All Years</option>
+              </select>
+              <select id="publisherFilter">
+                <option value="">All Publishers</option>
+              </select>
+              <label class="checkbox-label">
+                <input type="checkbox" id="pdfOnly"> <i class="fas fa-file-pdf"></i> PDF Only
+              </label>
+            </div>
+          </div>
+          <div id="resultsContainer" class="results-container">
+            <div id="resultsList" class="results-list">
+              <!-- Results will be injected here -->
+              <div class="empty-state">
+                <i class="fas fa-search fa-3x" style="margin-bottom: 20px; color: #cbd5e0;"></i>
+                <p>Start a search to see results here in real-time.</p>
+              </div>
+            </div>
+            <div id="pagination" class="pagination hidden">
+              <button id="prevPage" class="btn-sm"><i class="fas fa-chevron-left"></i> Previous</button>
+              <span id="pageInfo">Page 1 of 1</span>
+              <button id="nextPage" class="btn-sm">Next <i class="fas fa-chevron-right"></i></button>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
     <script src="/assets/app.js"></script>
   </body>

@@ -6,8 +6,10 @@ const url = require("url")
 const crypto = require("crypto")
 try {
   const dotenv = require("dotenv")
-  dotenv.config({ path: path.resolve(__dirname, "..", ".env") })
-  dotenv.config({ path: path.resolve(__dirname, "..", "..", ".env") })
+  // Check multiple locations for .env
+  dotenv.config({ path: path.resolve(__dirname, ".env") }) // Current server/ directory
+  dotenv.config({ path: path.resolve(__dirname, "..", ".env") }) // Project root
+  dotenv.config({ path: path.resolve(__dirname, "..", "..", ".env") }) // Parent directory
 } catch {}
 const axios = require("axios")
 const Archiver = require("archiver")
@@ -58,16 +60,43 @@ async function writeLineAsync(stream, line) {
   }
 }
 
-function parsePublication(summary) {
-  if (!summary) return { authors: "", journal: "", year: "" }
+function parsePublication(summary, citationMeta = {}) {
+  // Try citation meta first for higher accuracy
+  const metaDate = citationMeta["citation_publication_date"] || citationMeta["citation_date"] || citationMeta["dc.date"]
+  const metaPublisher = citationMeta["citation_publisher"] || citationMeta["dc.publisher"] || citationMeta["citation_journal_title"]
+  let year = ""
+  let fullDate = ""
+  let publisher = metaPublisher || ""
+  
+  if (metaDate) {
+    const d = new Date(metaDate)
+    if (!isNaN(d.getTime())) {
+      year = String(d.getFullYear())
+      fullDate = d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+    } else {
+      const yearMatch = metaDate.match(/\d{4}/)
+      year = yearMatch ? yearMatch[0] : ""
+      fullDate = metaDate
+    }
+  }
+
+  if (!summary) return { authors: "", journal: "", year: year || "", fullDate: fullDate || year, publisher }
+  
   const parts = summary.split(" - ")
   const authors = parts[0] || ""
   const journalAndYear = parts[1] || ""
   const journalParts = journalAndYear.split(", ")
-  const yearMatch = journalAndYear.match(/\d{4}/)
-  const year = yearMatch ? yearMatch[0] : ""
+  
+  if (!year) {
+    const yearMatch = journalAndYear.match(/\d{4}/)
+    year = yearMatch ? yearMatch[0] : ""
+    fullDate = year
+  }
+  
   const journal = journalParts[0] || ""
-  return { authors, journal, year }
+  // If publisher not in meta, try to infer from journal name or link if needed, 
+  // but journal is usually the publisher in some contexts or we keep it separate
+  return { authors, journal, year, fullDate: fullDate || year, publisher }
 }
 
 function extractCitationMeta(html){
@@ -86,28 +115,47 @@ async function fetchFullAbstract(targetUrl, scraperApiKey) {
   if (!targetUrl || !scraperApiKey) return { abstract: "", html: "", citation_meta: {} }
   try {
     const r = await axios.get("https://api.scraperapi.com/", {
-      params: { api_key: scraperApiKey, url: targetUrl },
-      timeout: 20000
+      params: { api_key: scraperApiKey, url: targetUrl, render: "true" }, // Use render:true for JS-heavy sites (Elsevier, etc.)
+      timeout: 30000
     })
     const html = String(r.data)
     const citation_meta = extractCitationMeta(html)
     
-    // Extract abstract using meta tags (Scholar common tags)
-    const metaMatch = html.match(/<meta[^>]*name=["'](?:citation_abstract|description|og:description|twitter:description|dc.description)["'][^>]*content=["']([^"']+)["']/i) ||
-                      html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["'](?:citation_abstract|description|og:description|twitter:description|dc.description)["']/i)
+    // Most common academic meta tags for abstracts
+    const metaMatch = html.match(/<meta[^>]*name=["'](?:citation_abstract|dc\.description|prism\.teaser|description|og:description|twitter:description|DC\.description)["'][^>]*content=["']([^"']+)["']/i) ||
+                      html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["'](?:citation_abstract|dc\.description|prism\.teaser|description|og:description|twitter:description|DC\.description)["']/i)
     
     let abstract = ""
     if (metaMatch && metaMatch[1]) {
       abstract = metaMatch[1].trim()
     } else {
-      // Fallback: look for "Abstract" section with more patterns
-      const absMatch = html.match(/Abstract<\/h[1-6]>\s*<p[^>]*>([\s\S]{10,2500}?)<\/p>/i) ||
-                       html.match(/<div[^>]*class=["']abstract["'][^>]*>([\s\S]{10,2500}?)<\/div>/i) ||
-                       html.match(/<blockquote[^>]*abstract[^>]*>([\s\S]{10,2500}?)<\/blockquote>/i) ||
-                       html.match(/<section[^>]*Abstract[^>]*>([\s\S]{10,2500}?)<\/section>/i) ||
-                       html.match(/<div[^>]*class=["']c-article-section__content["'][^>]*>([\s\S]{10,2500}?)<\/div>/i)
+      // Very aggressive fallback patterns for diverse publisher layouts
+      const absMatch = 
+        // 1. Elsevier/ScienceDirect
+        html.match(/<div[^>]*class=["']abstract-content[^"']*["'][^>]*>([\s\S]{50,10000}?)<\/div>/i) ||
+        // 2. Springer/Nature
+        html.match(/<div[^>]*class=["']c-article-section__content[^"']*["'][^>]*>([\s\S]{50,10000}?)<\/div>/i) ||
+        // 3. Wiley/IEEE
+        html.match(/<div[^>]*class=["']article-section__content[^"']*["'][^>]*>([\s\S]{50,10000}?)<\/div>/i) ||
+        // 4. PubMed/PMC
+        html.match(/<div[^>]*id=["']abstract["'][^>]*>([\s\S]{50,10000}?)<\/div>/i) ||
+        // 5. General "abstract" section
+        html.match(/Abstract<\/h[1-6]>\s*<p[^>]*>([\s\S]{50,10000}?)<\/p>/i) ||
+        // 6. Common class names
+        html.match(/<div[^>]*class=["'](?:abstract|abstract-text|paper-abstract)["'][^>]*>([\s\S]{50,10000}?)<\/div>/i) ||
+        // 7. ArXiv/Quote
+        html.match(/<blockquote[^>]*class=["']abstract[^"']*["'][^>]*>([\s\S]{50,10000}?)<\/blockquote>/i)
       
-      if (absMatch && absMatch[1]) abstract = absMatch[1].replace(/<[^>]*>/g, "").trim().substring(0, 3000)
+      if (absMatch && absMatch[1]) {
+        // Clean up HTML tags but keep the content fully intact
+        abstract = absMatch[1]
+          .replace(/<script[\s\S]*?<\/script>/gi, "") // Remove scripts
+          .replace(/<style[\s\S]*?<\/style>/gi, "")   // Remove styles
+          .replace(/<[^>]+>/g, " ")                  // Replace tags with spaces
+          .replace(/\s+/g, " ")                      // Normalize spaces
+          .trim()
+          .substring(0, 10000) // Significantly higher limit to capture everything
+      }
     }
     
     // Store only up to MAX_HTML_STORAGE_BYTES to prevent JSON bloat
@@ -119,9 +167,24 @@ async function fetchFullAbstract(targetUrl, scraperApiKey) {
   }
 }
 
-async function fetchScholar(keyword, apiKey, start=0, num=10){
+async function fetchScholar(keyword, apiKey, start=0, num=20, filters={}){
   const urlStr="https://serpapi.com/search.json"
-  const params={engine:"google_scholar",q:keyword,hl:"en",api_key:apiKey,start,num}
+  // Advanced parameters to match standard Google Scholar results 100%
+  const params={
+    engine: "google_scholar",
+    q: String(keyword).trim(),
+    api_key: apiKey,
+    start: start,
+    num: num,
+    hl: "en",
+    gl: "us",
+    as_ylo: filters.yearFrom || "",
+    as_yhi: filters.yearTo || "",
+    as_sauthors: filters.author || "",
+    as_publication: filters.journal || "",
+    as_sdt: "0,5",
+    scisbd: 0 // 0 for relevance, 1 for date
+  }
   const r=await axios.get(urlStr,{params,timeout:20000,validateStatus:()=>true})
   if(!r.data) throw new Error("empty_response")
   if(r.status===429 || (r.data.error && r.data.error.includes("quota"))) {
@@ -134,11 +197,18 @@ async function fetchScholar(keyword, apiKey, start=0, num=10){
   const rows=[]
   for(const item of results){
     let pdfUrl = ""
+    // 1. Direct resources check
     const pdfRes=Array.isArray(item.resources)?item.resources.find(x=>x.file_format==="PDF"):null
     if (pdfRes) {
       pdfUrl = pdfRes.link
-    } else if (item.link && (item.link.toLowerCase().endsWith(".pdf") || item.link.toLowerCase().includes("pdf"))) {
+    } 
+    // 2. Check main link
+    else if (item.link && (item.link.toLowerCase().endsWith(".pdf") || item.link.toLowerCase().includes("pdf"))) {
       pdfUrl = item.link
+    }
+    // 3. Check version links (New improvement)
+    else if (item.inline_links?.versions?.link && item.inline_links.versions.link.toLowerCase().includes("pdf")) {
+      pdfUrl = item.inline_links.versions.link
     }
 
     rows.push({
@@ -152,12 +222,12 @@ async function fetchScholar(keyword, apiKey, start=0, num=10){
   }
   return rows
 }
-async function fetchScholarPaged(keyword, apiKey,{maxResults=DEFAULT_MAX_RESULTS,rateDelay=DEFAULT_RATE_DELAY}={}){
+async function fetchScholarPaged(keyword, apiKey,{maxResults=DEFAULT_MAX_RESULTS,rateDelay=DEFAULT_RATE_DELAY,filters={}}={}){
   const all=[]; let start=0
   const PAGE_SIZE = 20 // Google Scholar limit per page is 20
   while(all.length<maxResults){
     const num = Math.min(PAGE_SIZE, maxResults - all.length)
-    const rows=await withRetry(()=>fetchScholar(keyword,apiKey,start,num),{retries:3,baseDelay:600})
+    const rows=await withRetry(()=>fetchScholar(keyword,apiKey,start,num,filters),{retries:3,baseDelay:600})
     if(!rows.length) break
     for(const r of rows){ if(all.length<maxResults) all.push(r) }
     if(rows.length<num) break
@@ -165,26 +235,47 @@ async function fetchScholarPaged(keyword, apiKey,{maxResults=DEFAULT_MAX_RESULTS
   }
   return all
 }
+function getDomainScore(link){
+  if(!link) return 0
+  const l = link.toLowerCase()
+  if(l.includes("ieee")) return 10
+  if(l.includes("acm.org")) return 10
+  if(l.includes("springer.com")) return 10
+  if(l.includes("nature.com")) return 10
+  if(l.includes("science.org")) return 10
+  if(l.includes("arxiv.org")) return 8
+  if(l.includes("researchgate.net")) return 4
+  if(l.includes("sciencedirect.com") || l.includes("elsevier.com")) return 10
+  if(l.includes("wiley.com")) return 8
+  if(l.includes(".edu")) return 5
+  return 2
+}
+
+async function ensureTmp(jobId){ 
+  const dir=path.join(root,"tmp",jobId); 
+  await fsp.mkdir(dir,{recursive:true}); 
+  return dir 
+}
+
 async function runScholarJob(job){
   job.status="running"; job.errors=[]
   const all=[]
   const limit = pLimit(CONCURRENCY_LIMIT)
   
-  const csvHeaders=["keyword","title","link","authors","journal","year","snippet","full_abstract","pdf_url"]
-  const csvPath=path.join(job.tmpDir,"results.csv")
-  const csvStream = fs.createWriteStream(csvPath)
-  await writeLineAsync(csvStream, csvHeaders.join(","))
-
   let completedKeywords = 0
   let aborted = false
   const tasks = job.keywords.map(kw => limit(async () => {
     if (aborted) return
     try {
-      const rows = await fetchScholarPaged(kw, job.apiKey, {maxResults: DEFAULT_MAX_RESULTS, rateDelay: DEFAULT_RATE_DELAY})
+      const collectionLimit = 100 // Reduced from 200 to 100 to match top Scholar results
+      const rows = await fetchScholarPaged(kw, job.apiKey, {
+        maxResults: collectionLimit, 
+        rateDelay: DEFAULT_RATE_DELAY,
+        filters: job.filters || {}
+      })
       if (rows.length) {
-        // Fetch full abstracts for each result using ScraperAPI
         if (SCRAPER_KEY) {
-          const absLimit = pLimit(5) // Limit concurrent abstract fetches
+          const absLimit = pLimit(5)
           await Promise.all(rows.map(r => absLimit(async () => {
             const paperUrl = r.serpapi_raw.link
             if (paperUrl) {
@@ -197,24 +288,27 @@ async function runScholarJob(job){
         }
 
         for (const r of rows) {
-          if (all.length < MAX_JSON_RESULTS) { // Global memory protection for JSON and CSV
+          if (all.length < MAX_JSON_RESULTS) {
             all.push(r)
             
-            // Map raw data to basic fields for CSV
-            const raw = r.serpapi_raw
-            const { authors, journal, year } = parsePublication(raw.publication_info?.summary || "")
-            const csvRow = {
-              keyword: r.keyword,
-              title: raw.title || "",
-              link: raw.link || "",
-              authors,
-              journal,
-              year,
-              snippet: raw.snippet || "",
-              full_abstract: r.full_abstract || "",
-              pdf_url: r.pdf_url || ""
+            if (!job.results_preview) job.results_preview = []
+            const pub = parsePublication(r.serpapi_raw.publication_info?.summary || "", r.citation_meta)
+            const previewRow = {
+              title: r.serpapi_raw.title,
+              link: r.serpapi_raw.link,
+              snippet: r.serpapi_raw.snippet,
+              authors: pub.authors,
+              journal: pub.journal,
+              publisher: pub.publisher || pub.journal, // Store publisher separately
+              year: pub.fullDate || pub.year, // Use full calendar date if available
+              pdf_url: r.pdf_url,
+              full_abstract: r.full_abstract,
+              cited_by: r.serpapi_raw.inline_links?.cited_by?.total || 0,
+              versions_total: r.serpapi_raw.inline_links?.versions?.total || 0,
+              versions_link: r.serpapi_raw.inline_links?.versions?.link || ""
             }
-            await writeLineAsync(csvStream, csvHeaders.map(h => csvEscape(csvRow[h])).join(","))
+            job.results_preview.push(previewRow) // Use push to maintain Scholar ranking order
+            if (job.results_preview.length > 500) job.results_preview.shift() // Remove from beginning if too many
           }
         }
       } else {
@@ -234,27 +328,58 @@ async function runScholarJob(job){
   }))
 
   await Promise.all(tasks)
-  await new Promise(resolve => { csvStream.end(resolve) }) // Safer closing
   
-  job.resultsCount=all.length
-  if(!all.length){ job.status="failed"; job.progress=100; job.message="no_results"; return }
+  // Use results in the order they were collected from Scholar
+  let finalResults = all
+  
+  // Limit to max results per job requirement
+  if (finalResults.length > DEFAULT_MAX_RESULTS) {
+    finalResults = finalResults.slice(0, DEFAULT_MAX_RESULTS)
+  }
+  
+  // CSV Writing
+  const csvHeaders=["keyword","title","link","authors","journal","year","snippet","full_abstract","pdf_url"]
+  const csvPath=path.join(job.tmpDir,"results.csv")
+  const csvStream = fs.createWriteStream(csvPath)
+  await writeLineAsync(csvStream, csvHeaders.join(","))
+  
+  for (const r of finalResults) {
+      const raw = r.serpapi_raw
+      const { authors, journal, year, fullDate } = parsePublication(raw.publication_info?.summary || "", r.citation_meta)
+      const csvRow = {
+        keyword: r.keyword,
+        title: raw.title || "",
+        link: raw.link || "",
+        authors,
+        journal,
+        year: fullDate || year,
+        snippet: raw.snippet || "",
+        full_abstract: r.full_abstract || "",
+        pdf_url: r.pdf_url || ""
+      }
+      await writeLineAsync(csvStream, csvHeaders.map(h => csvEscape(csvRow[h])).join(","))
+    }
+  await new Promise(resolve => { csvStream.end(resolve) })
+  
+  job.resultsCount=finalResults.length
+  if(!finalResults.length){ job.status="failed"; job.progress=100; job.message="no_results"; return }
   
   job.progress=70
   job.csvPath=csvPath
   
   job.progress=80
-  // Excel also uses basic fields
+  // Excel
   const wb=XLSX.utils.book_new()
-  const xlsxData = [csvHeaders, ...all.map(r => {
+  const xlsxData = [csvHeaders, ...finalResults.map(r => {
     const raw = r.serpapi_raw
-    const { authors, journal, year } = parsePublication(raw.publication_info?.summary || "")
+    const { authors, journal, year, fullDate } = parsePublication(raw.publication_info?.summary || "", r.citation_meta)
     return [
       r.keyword,
       raw.title || "",
       raw.link || "",
       authors,
       journal,
-      year,
+      fullDate || year,
       raw.snippet || "",
       r.full_abstract || "",
       r.pdf_url || ""
@@ -264,11 +389,11 @@ async function runScholarJob(job){
   const xlsxPath=path.join(job.tmpDir,"results.xlsx"); XLSX.writeFile(wb,xlsxPath); job.xlsxPath=xlsxPath
   
   const jsonPath=path.join(job.tmpDir,"results.json")
-  await fsp.writeFile(jsonPath,JSON.stringify(all,null,2),"utf8") // JSON keeps everything
+  await fsp.writeFile(jsonPath,JSON.stringify(finalResults,null,2),"utf8") 
   job.jsonPath=jsonPath
   
   job.progress=85
-  job.pdfs=all // Try to download all papers found
+  job.pdfs=finalResults
   job.results=[]; job.progress=100; job.status="succeeded"
 }
 async function ensureTmp(jobId){ 
@@ -282,11 +407,32 @@ async function handleKeywords(req,res){
     return json(res,413,{error:"request too large (max 5MB)"})
   }
   const body=await new Promise(r=>{ let d=[]; req.on("data",c=>d.push(c)); req.on("end",()=>{ try{ r(JSON.parse(Buffer.concat(d).toString("utf8")||"{}")) }catch{ r({}) } }) })
-  const arr=Array.isArray(body.keywords)?body.keywords.map(s=>String(s).trim()).filter(Boolean):[]
-  if(!arr.length) return json(res,400,{error:"no keywords"})
+  const keywords=Array.isArray(body.keywords)?body.keywords.map(s=>String(s).trim()).filter(Boolean):[]
+  if(!keywords.length) return json(res,400,{error:"no keywords"})
+
+  const filters = {
+    author: body.advAuthor || "",
+    journal: body.advJournal || "",
+    yearFrom: body.yearFrom || "",
+    yearTo: body.yearTo || ""
+  }
+
   const jobId=crypto.randomBytes(8).toString("hex"); 
   const tmpDir=await ensureTmp(jobId)
-  const job={id:jobId,status:"queued",progress:0,keywords:arr,tmpDir,createdAt:Date.now(),results:[],apiKey}; scholarJobs.set(jobId,job); runScholarJob(job); return json(res,200,{jobId})
+  const job={
+    id:jobId,
+    status:"queued",
+    progress:0,
+    keywords:keywords,
+    filters:filters,
+    tmpDir,
+    createdAt:Date.now(),
+    results:[],
+    apiKey
+  }; 
+  scholarJobs.set(jobId,job); 
+  runScholarJob(job); 
+  return json(res,200,{jobId})
 }
 function streamCSV(res,job){ res.statusCode=200; res.setHeader("Content-Type","text/csv; charset=utf-8"); res.setHeader("Content-Disposition",`attachment; filename="${safeName("results",".csv")}"`); fs.createReadStream(job.csvPath).pipe(res) }
 function streamXLSX(res,job){ res.statusCode=200; res.setHeader("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); res.setHeader("Content-Disposition",`attachment; filename="${safeName("results",".xlsx")}"`); fs.createReadStream(job.xlsxPath).pipe(res) }
@@ -407,7 +553,21 @@ const server=http.createServer(async (req,res)=>{
   if(req.method==="GET" && pathname.startsWith("/assets/")){ return await serveFile(res,path.join(webDir,pathname)) }
   if(req.method==="GET" && pathname==="/api/health"){ return json(res,200,{up:true,hasSerpApiKey:Boolean(SERP_KEY),port,auth:Boolean(process.env.API_TOKEN)}) }
   if(req.method==="POST" && pathname==="/api/scholar/keywords"){ if(API_TOKEN){ const auth=req.headers["authorization"]||""; if(auth!==`Bearer ${API_TOKEN}`) return json(res,401,{error:"unauthorized"}) } return handleKeywords(req,res) }
-  if(req.method==="GET" && /^\/api\/scholar\/[^/]+\/status$/.test(pathname)){ const id=pathname.split("/")[3]; const job=scholarJobs.get(id); if(!job) return json(res,404,{error:"job_not_found"}); return json(res,200,{ id:job.id,status:job.status,progress:job.progress,keywords:job.keywords, counts:{results:job.resultsCount||0,pdfs:(job.pdfs||[]).length}, errors:job.errors||[], message:job.message||"" }) }
+  if(req.method==="GET" && /^\/api\/scholar\/[^/]+\/status$/.test(pathname)){ 
+    const id=pathname.split("/")[3]; 
+    const job=scholarJobs.get(id); 
+    if(!job) return json(res,404,{error:"job_not_found"}); 
+    return json(res,200,{ 
+      id:job.id,
+      status:job.status,
+      progress:job.progress,
+      keywords:job.keywords, 
+      counts:{results:job.resultsCount||0,pdfs:(job.pdfs||[]).length}, 
+      errors:job.errors||[], 
+      message:job.message||"",
+      results: job.results_preview || [] // Provide preview results for real-time UI
+    }) 
+  }
   if(req.method==="GET" && /^\/api\/scholar\/[^/]+\/results\.csv$/.test(pathname)){ const id=pathname.split("/")[3]; const job=scholarJobs.get(id); if(!job||job.status!=="succeeded"||!job.csvPath) return notFound(res); return streamCSV(res,job) }
   if(req.method==="GET" && /^\/api\/scholar\/[^/]+\/results\.xlsx$/.test(pathname)){ const id=pathname.split("/")[3]; const job=scholarJobs.get(id); if(!job||job.status!=="succeeded"||!job.xlsxPath) return notFound(res); return streamXLSX(res,job) }
   if(req.method==="GET" && /^\/api\/scholar\/[^/]+\/results\.json$/.test(pathname)){ const id=pathname.split("/")[3]; const job=scholarJobs.get(id); if(!job||job.status!=="succeeded"||!job.jsonPath) return notFound(res); return streamJSON(res,job) }
